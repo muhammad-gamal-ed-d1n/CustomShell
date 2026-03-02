@@ -34,10 +34,6 @@ int shell_loop(char **env)
         }
         char** args = parse_input(input);
 
-        for (int i = 0; args[i]; i++) {
-            printf("%s\n", args[i]);
-        }
-
         execute_command(args);
     }
 }
@@ -56,6 +52,7 @@ int execute_command(char** args) {
         while(1) {
             pid_t end = waitpid(child, &status, WUNTRACED|WNOHANG);
             if (WIFEXITED(status)) {
+                printf("executing\n");
                 return 0;
             }
         }
