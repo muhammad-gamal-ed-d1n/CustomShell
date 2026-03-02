@@ -8,12 +8,18 @@
 #define MAX_ARGS 10
 #define MAX_PATH 1024
 
-typedef int (*builtin_func)(char **args);
+typedef int (*builtin_func)(char **args, struct hashmap *env);
 
 struct builtin
 {
     char *name;
     builtin_func f;
+};
+
+struct var
+{
+    char *name;
+    char *value;
 };
 
 // prototypes
@@ -24,8 +30,11 @@ uint64_t builtin_hash(const void *item, uint64_t seed0, uint64_t seed1);
 int builtin_compare(const void *a, const void *b, void *udata);
 bool builtin_iter(const void *item, void *udata);
 int initialize_builtins(struct hashmap *builtins);
-int cd(char **args);
-int echo(char **args);
+int var_compare(const void *a, const void *b, void *udata);
+uint64_t var_hash(const void *item, uint64_t seed0, uint64_t seed1);
+int cd(char **args, struct hashmap *env);
+int echo(char **args, struct hashmap *env);
+int export(char **args, struct hashmap *env);
 
 int set_environment(char *cwd)
 {
@@ -42,6 +51,11 @@ int shell_loop()
         sizeof(struct builtin),
         0, 0, 0,
         builtin_hash, builtin_compare,
+        NULL, NULL);
+    struct hashmap *env = hashmap_new(
+        sizeof(struct var),
+        0, 0, 0,
+        var_hash, var_compare,
         NULL, NULL);
 
     initialize_builtins(builtins);
@@ -63,7 +77,7 @@ int shell_loop()
         const struct builtin *builtin = hashmap_get(builtins, &(struct builtin){.name = args[0]});
         if (builtin)
         {
-            builtin->f(args);
+            builtin->f(args, env);
         }
         else
         {
@@ -113,8 +127,8 @@ int main(void)
 char **parse_input(char *input)
 {
     char **tokens = malloc(MAX_ARGS * sizeof(char *));
-    char *token = NULL;
     size_t position = 0, token_len = 0;
+    int quoted = 0;
 
     if (!tokens)
     {
@@ -126,10 +140,29 @@ char **parse_input(char *input)
     {
 
         token_len = 0;
-        token = NULL;
-        while (input[i] && input[i] != ' ' && input[i] != '\n')
+        quoted = 0;
+        // loop over normal input with no quotes
+        while (input[i] && input[i] != ' ' && input[i] != '"' && input[i] != '\n')
         {
             token_len++;
+            i++;
+        }
+
+        // handle quoted input
+        if (input[i] == '"')
+        {
+            quoted = 1;
+            i++;
+            while (input[i] && input[i] != '"' && input[i] != '\n')
+            {
+                token_len++;
+                i++;
+            }
+            if (input[i] != '"')
+            {
+                printf("Non-terminated quotation\n");
+                exit(1);
+            }
             i++;
         }
 
@@ -141,7 +174,7 @@ char **parse_input(char *input)
             exit(1);
         }
 
-        size_t start = i - token_len;
+        size_t start = i - token_len - quoted;
         for (int j = 0; j < token_len; j++)
         {
             tokens[position][j] = input[start + j];
@@ -167,17 +200,23 @@ int builtin_compare(const void *a, const void *b, void *udata)
     return strcmp(ua->name, ub->name);
 }
 
-bool builtin_iter(const void *item, void *udata)
-{
-    const struct builtin *builtin = item;
-    printf("%s\n", builtin->name);
-    return true;
-}
-
 uint64_t builtin_hash(const void *item, uint64_t seed0, uint64_t seed1)
 {
     const struct builtin *builtin = item;
     return hashmap_sip(builtin->name, strlen(builtin->name), seed0, seed1);
+}
+
+int var_compare(const void *a, const void *b, void *udata)
+{
+    const struct var *ua = a;
+    const struct var *ub = b;
+    return strcmp(ua->name, ub->name);
+}
+
+uint64_t var_hash(const void *item, uint64_t seed0, uint64_t seed1)
+{
+    const struct var *var = item;
+    return hashmap_sip(var->name, strlen(var->name), seed0, seed1);
 }
 
 // initialize builtin map
@@ -189,7 +228,7 @@ int initialize_builtins(struct hashmap *builtins)
 }
 
 // builtin functions
-int cd(char **args)
+int cd(char **args, struct hashmap *env)
 {
     char *path = args[1];
     char *fullpath = malloc(MAX_PATH * sizeof(char));
@@ -212,20 +251,31 @@ int cd(char **args)
     }
 }
 
-int echo(char **args)
+int echo(char **args, struct hashmap *env)
 {
+    // iterate over words
     for (int i = 1; args[i]; i++)
     {
-        for (int j = 0; args[i][j]; j++)
+        if (args[i][0] == '$')
         {
-            if (args[i][j] != '"')
-            {
-                printf("%c", args[i][j]);
+            char *name = strdup(args[i] + 1);
+            const struct var *v = hashmap_get(env, &(struct var){.name = name});
+            if (v) {
+                printf("%s", v->name);
             }
         }
-        if (args[i + 1]) {
+        else
+        {
+            printf("%s", args[i]);
+        }
+        if (args[i + 1])
+        {
             printf(" ");
         }
     }
     printf("\n");
+}
+
+int export(char **args, struct hashmap *env)
+{
 }
