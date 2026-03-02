@@ -1,10 +1,12 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <sys/wait.h>
 
 #define MAX_ARGS 10
 
 char **parse_input(char *input);
+int execute_command(char** args);
 
 int set_environment(char *cwd)
 {
@@ -31,9 +33,34 @@ int shell_loop(char **env)
             exit(1);
         }
         char** args = parse_input(input);
-        for(int i = 0; args[i]; i++) {
-            printf("%s\n", args[i]);
+
+        execute_command(args);
+    }
+}
+
+int execute_command(char** args) {
+    __pid_t child = fork();
+
+    if (child == 0) {
+        if (execvp(args[0], args) == -1) {
+            perror("execvp error");
+            exit(1);
         }
+    }
+    else {
+        size_t seconds = 0;
+        while(1) {
+            pid_t end = waitpid(child, NULL, WUNTRACED|WNOHANG);
+            if (end == child) {
+                return 0;
+            }
+            if (seconds > 10) {
+                break;
+            }
+            seconds++;
+        }
+        perror("Command timeout");
+        exit(1);
     }
 }
 
