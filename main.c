@@ -2,29 +2,55 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <sys/wait.h>
+#include "lib/hashmap.h"
+#include <string.h>
 
 #define MAX_ARGS 10
+#define MAX_PATH 1024
 
+typedef int (*builtin_func)(char **args);
+
+struct builtin
+{
+    char *name;
+    builtin_func f;
+};
+
+// prototypes
 char **parse_input(char *input);
-int execute_command(char** args);
+int execute_command(char **args);
+int free_args(char **args);
+uint64_t builtin_hash(const void *item, uint64_t seed0, uint64_t seed1);
+int builtin_compare(const void *a, const void *b, void *udata);
+bool builtin_iter(const void *item, void *udata);
+int initialize_builtins(struct hashmap *builtins);
+int cd(char **args);
+int echo(char **args);
 
 int set_environment(char *cwd)
 {
     getcwd(cwd, sizeof(cwd));
 }
 
-int shell_loop(char **env)
+int shell_loop()
 {
     // initialize variables
     char *input = NULL;
     size_t input_size = 0;
-    char *cwd = getcwd(NULL, 0);
+    char *cwd;
+    struct hashmap *builtins = hashmap_new(
+        sizeof(struct builtin),
+        0, 0, 0,
+        builtin_hash, builtin_compare,
+        NULL, NULL);
 
-    // set wokring environment
-    set_environment(cwd);
+    initialize_builtins(builtins);
 
     while (1)
     {
+        // set wokring environment
+        cwd = getcwd(NULL, 0);
+
         // prompt for input
         printf("user@%s$ ", cwd);
         if (getline(&input, &input_size, stdin) == -1)
@@ -32,30 +58,56 @@ int shell_loop(char **env)
             perror("Error reading input.");
             exit(1);
         }
-        char** args = parse_input(input);
+        char **args = parse_input(input);
 
-        execute_command(args);
+        const struct builtin *builtin = hashmap_get(builtins, &(struct builtin){.name = args[0]});
+        if (builtin)
+        {
+            builtin->f(args);
+        }
+        else
+        {
+            execute_command(args);
+        }
+        free_args(args);
     }
 }
 
-int execute_command(char** args) {
+int execute_command(char **args)
+{
     __pid_t pid = fork();
 
-    if (pid == 0) {
+    if (pid < 0)
+    {
+        perror("fork failed");
+        return 1;
+    }
+    if (pid == 0)
+    {
         execvp(args[0], args);
         perror("execvp error");
         exit(1);
     }
-    else {
+    else
+    {
         int status = 0;
         pid_t end = waitpid(pid, &status, 0);
         return 0;
     }
 }
 
-int main(char **env)
+int free_args(char **args)
 {
-    shell_loop(env);
+    for (int i = 0; args[i]; i++)
+    {
+        free(args[i]);
+    }
+    free(args);
+}
+
+int main(void)
+{
+    shell_loop();
 }
 
 char **parse_input(char *input)
@@ -83,23 +135,97 @@ char **parse_input(char *input)
 
         tokens[position] = malloc(sizeof(char) * (token_len + 1));
 
-        if (!tokens[position]) {
+        if (!tokens[position])
+        {
             perror("Error parsing input");
             exit(1);
         }
 
         size_t start = i - token_len;
-        for (int j = 0; j < token_len; j++) {
+        for (int j = 0; j < token_len; j++)
+        {
             tokens[position][j] = input[start + j];
         }
         tokens[position][token_len] = '\0';
         position++;
 
-        while(input[i] && (input[i] == ' ' || input[i] == '\n')) {
+        while (input[i] && (input[i] == ' ' || input[i] == '\n'))
+        {
             i++;
         }
     }
 
     tokens[position] = NULL;
     return tokens;
+}
+
+// functions required by the hashmap
+int builtin_compare(const void *a, const void *b, void *udata)
+{
+    const struct builtin *ua = a;
+    const struct builtin *ub = b;
+    return strcmp(ua->name, ub->name);
+}
+
+bool builtin_iter(const void *item, void *udata)
+{
+    const struct builtin *builtin = item;
+    printf("%s\n", builtin->name);
+    return true;
+}
+
+uint64_t builtin_hash(const void *item, uint64_t seed0, uint64_t seed1)
+{
+    const struct builtin *builtin = item;
+    return hashmap_sip(builtin->name, strlen(builtin->name), seed0, seed1);
+}
+
+// initialize builtin map
+int initialize_builtins(struct hashmap *builtins)
+{
+    hashmap_set(builtins, &(struct builtin){.name = "cd", .f = cd});
+    hashmap_set(builtins, &(struct builtin){.name = "echo", .f = echo});
+    hashmap_set(builtins, &(struct builtin){.name = "cd", .f = cd});
+}
+
+// builtin functions
+int cd(char **args)
+{
+    char *path = args[1];
+    char *fullpath = malloc(MAX_PATH * sizeof(char));
+    if (!path)
+    {
+        printf("Usage: cd PATH\n");
+        return 0;
+    }
+    if (path[0] == '~')
+    {
+        const char *home = getenv("HOME");
+        snprintf(fullpath, sizeof(fullpath), "%s%s", home, path + 1);
+        printf("%s\n", fullpath);
+        printf("%s\n", path);
+    }
+    if (chdir(path) != 0)
+    {
+        perror("Error:");
+        return 0;
+    }
+}
+
+int echo(char **args)
+{
+    for (int i = 1; args[i]; i++)
+    {
+        for (int j = 0; args[i][j]; j++)
+        {
+            if (args[i][j] != '"')
+            {
+                printf("%c", args[i][j]);
+            }
+        }
+        if (args[i + 1]) {
+            printf(" ");
+        }
+    }
+    printf("\n");
 }
