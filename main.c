@@ -39,23 +39,17 @@ int shell_loop(char **env)
 }
 
 int execute_command(char** args) {
-    __pid_t child = fork();
+    __pid_t pid = fork();
 
-    if (child == 0) {
-        if (execvp(args[0], args) == -1) {
-            perror("execvp error");
-            exit(1);
-        }
+    if (pid == 0) {
+        execvp(args[0], args);
+        perror("execvp error");
+        exit(1);
     }
     else {
         int status = 0;
-        while(1) {
-            pid_t end = waitpid(child, &status, WUNTRACED|WNOHANG);
-            if (WIFEXITED(status)) {
-                printf("executing\n");
-                return 0;
-            }
-        }
+        pid_t end = waitpid(pid, &status, 0);
+        return 0;
     }
 }
 
