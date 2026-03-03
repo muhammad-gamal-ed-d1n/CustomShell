@@ -80,6 +80,7 @@ int shell_loop()
         const struct builtin *builtin = hashmap_get(builtins, &(struct builtin){.name = args[0]});
         if (builtin)
         {
+            printf("builtin\n");
             builtin->f(args, env);
         }
         else
@@ -113,7 +114,7 @@ int execute_command(char **args)
     else if (pid == 0)
     {
         execvp(args[0], args);
-        perror("execvp error");
+        printf("Unkown command or error in execution\n");
         exit(1);
     }
     else if (pid > 0)
