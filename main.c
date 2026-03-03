@@ -89,8 +89,19 @@ int shell_loop()
 
 int execute_command(char **args)
 {
-    __pid_t pid = fork();
+    int background = 0;
 
+    int i = 0;
+    while (args[i])
+    {
+        i++;
+    }
+    if (i > 0 && strcmp(args[i - 1], "&") == 0) {
+        background = 1;
+        args[i - 1] = NULL;
+    }
+    
+    __pid_t pid = fork();
     if (pid < 0)
     {
         perror("fork failed");
@@ -104,9 +115,9 @@ int execute_command(char **args)
     }
     else
     {
-        int status = 0;
-        pid_t end = waitpid(pid, &status, 0);
-        return 0;
+        if (!background) {
+            pid_t end = waitpid(pid, NULL, 0);
+        }
     }
 }
 
@@ -138,11 +149,11 @@ char **parse_input(char *input)
 
     for (int i = 0; input[i];)
     {
-
         token_len = 0;
         quoted = 0;
+
         // loop over normal input with no quotes
-        while (input[i] && input[i] != ' ' && input[i] != '"' && input[i] != '\n')
+        while (input[i] && input[i] != ' ' && input[i] != '"' && input[i] != '\n' && input[i] != '=')
         {
             token_len++;
             i++;
@@ -165,7 +176,6 @@ char **parse_input(char *input)
             }
             i++;
         }
-
         tokens[position] = malloc(sizeof(char) * (token_len + 1));
 
         if (!tokens[position])
@@ -182,7 +192,7 @@ char **parse_input(char *input)
         tokens[position][token_len] = '\0';
         position++;
 
-        while (input[i] && (input[i] == ' ' || input[i] == '\n'))
+        while (input[i] && (input[i] == ' ' || input[i] == '\n' || input[i] == '='))
         {
             i++;
         }
@@ -215,8 +225,8 @@ int var_compare(const void *a, const void *b, void *udata)
 
 uint64_t var_hash(const void *item, uint64_t seed0, uint64_t seed1)
 {
-    const struct var *var = item;
-    return hashmap_sip(var->name, strlen(var->name), seed0, seed1);
+    const struct var *v = item;
+    return hashmap_sip(v->name, strlen(v->name), seed0, seed1);
 }
 
 // initialize builtin map
@@ -224,7 +234,7 @@ int initialize_builtins(struct hashmap *builtins)
 {
     hashmap_set(builtins, &(struct builtin){.name = "cd", .f = cd});
     hashmap_set(builtins, &(struct builtin){.name = "echo", .f = echo});
-    hashmap_set(builtins, &(struct builtin){.name = "cd", .f = cd});
+    hashmap_set(builtins, &(struct builtin){.name = "export", .f = export});
 }
 
 // builtin functions
@@ -237,6 +247,7 @@ int cd(char **args, struct hashmap *env)
         printf("Usage: cd PATH\n");
         return 0;
     }
+    // add home directory
     if (path[0] == '~')
     {
         const char *home = getenv("HOME");
@@ -253,29 +264,51 @@ int cd(char **args, struct hashmap *env)
 
 int echo(char **args, struct hashmap *env)
 {
-    // iterate over words
     for (int i = 1; args[i]; i++)
     {
-        if (args[i][0] == '$')
+        char *p = args[i];
+
+        while (*p)
         {
-            char *name = strdup(args[i] + 1);
-            const struct var *v = hashmap_get(env, &(struct var){.name = name});
-            if (v) {
-                printf("%s", v->name);
+            if (*p == '$')
+            {
+                p++;
+                char name[256];
+                int j = 0;
+
+                while (*p && *p != ' ')
+                {
+                    name[j++] = *p;
+                    p++;
+                }
+                name[j] = '\0';
+
+                const struct var *v = hashmap_get(env, &(struct var){.name = name});
+                if (v)
+                {
+                    printf("%s", v->value);
+                }
+            }
+            else
+            {
+                putchar(*p);
+                p++;
             }
         }
-        else
-        {
-            printf("%s", args[i]);
-        }
         if (args[i + 1])
-        {
             printf(" ");
-        }
     }
     printf("\n");
+    return 0;
 }
 
 int export(char **args, struct hashmap *env)
 {
+    if (args[1] && args[2])
+    {
+        struct var v;
+        v.name = strdup(args[1]);
+        v.value = strdup(args[2]);
+        hashmap_set(env, &v);
+    }
 }
