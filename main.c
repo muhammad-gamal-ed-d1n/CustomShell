@@ -37,6 +37,7 @@ uint64_t var_hash(const void *item, uint64_t seed0, uint64_t seed1);
 int cd(char **args, struct hashmap *env);
 int echo(char **args, struct hashmap *env);
 int export(char **args, struct hashmap *env);
+int shell_exit(char **args, struct hashmap *env);
 void setupsighandler();
 
 int set_environment(char *cwd)
@@ -80,7 +81,6 @@ int shell_loop()
         const struct builtin *builtin = hashmap_get(builtins, &(struct builtin){.name = args[0]});
         if (builtin)
         {
-            printf("builtin\n");
             builtin->f(args, env);
         }
         else
@@ -243,6 +243,7 @@ int initialize_builtins(struct hashmap *builtins)
     hashmap_set(builtins, &(struct builtin){.name = "cd", .f = cd});
     hashmap_set(builtins, &(struct builtin){.name = "echo", .f = echo});
     hashmap_set(builtins, &(struct builtin){.name = "export", .f = export});
+    hashmap_set(builtins, &(struct builtin){.name = "exit", .f = shell_exit});
 }
 
 // builtin functions
@@ -319,6 +320,11 @@ int export(char **args, struct hashmap *env)
         v.value = strdup(args[2]);
         hashmap_set(env, &v);
     }
+}
+
+int shell_exit(char **args, struct hashmap *env)
+{
+    exit(0);
 }
 
 void sigchildhandler(int sig) {
