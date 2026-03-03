@@ -1,9 +1,11 @@
+#define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <sys/wait.h>
 #include "lib/hashmap.h"
 #include <string.h>
+#include <signal.h>
 
 #define MAX_ARGS 10
 #define MAX_PATH 1024
@@ -35,6 +37,7 @@ uint64_t var_hash(const void *item, uint64_t seed0, uint64_t seed1);
 int cd(char **args, struct hashmap *env);
 int echo(char **args, struct hashmap *env);
 int export(char **args, struct hashmap *env);
+void setupsighandler();
 
 int set_environment(char *cwd)
 {
@@ -107,17 +110,20 @@ int execute_command(char **args)
         perror("fork failed");
         return 1;
     }
-    if (pid == 0)
+    else if (pid == 0)
     {
         execvp(args[0], args);
         perror("execvp error");
         exit(1);
     }
-    else
+    else if (pid > 0)
     {
         if (!background) {
             pid_t end = waitpid(pid, NULL, 0);
         }
+    }
+    else {
+        perror("fork failed");
     }
 }
 
@@ -132,6 +138,7 @@ int free_args(char **args)
 
 int main(void)
 {
+    setupsighandler();
     shell_loop();
 }
 
@@ -312,3 +319,24 @@ int export(char **args, struct hashmap *env)
         hashmap_set(env, &v);
     }
 }
+
+void sigchildhandler(int sig) {
+    __pid_t pid;
+
+    while((pid = waitpid(-1, NULL, WNOHANG)) > 0) {
+        FILE *log = fopen("log.txt", "a");
+
+        if (log) {
+            fprintf(log, "Child process terminated: %d\n", pid);
+            fclose(log);
+        }
+
+    }
+}
+
+void setupsighandler() {
+    struct sigaction sa;
+    sa.sa_handler = sigchildhandler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
+    sigaction(SIGCHLD, &sa, NULL);
