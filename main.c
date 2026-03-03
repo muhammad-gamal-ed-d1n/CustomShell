@@ -25,7 +25,7 @@ struct var
 };
 
 // prototypes
-char **parse_input(char *input);
+char **parse_input(char *input, struct hashmap *env);
 int execute_command(char **args);
 int free_args(char **args);
 uint64_t builtin_hash(const void *item, uint64_t seed0, uint64_t seed1);
@@ -38,6 +38,7 @@ int cd(char **args, struct hashmap *env);
 int echo(char **args, struct hashmap *env);
 int export(char **args, struct hashmap *env);
 int shell_exit(char **args, struct hashmap *env);
+void expand_tokens(char ***args_ptr, struct hashmap *env);
 void setupsighandler();
 
 int set_environment(char *cwd)
@@ -76,7 +77,8 @@ int shell_loop()
             perror("Error reading input.");
             exit(1);
         }
-        char **args = parse_input(input);
+        char **args = parse_input(input, env);
+        expand_tokens(&args, env);
 
         const struct builtin *builtin = hashmap_get(builtins, &(struct builtin){.name = args[0]});
         if (builtin)
@@ -100,11 +102,12 @@ int execute_command(char **args)
     {
         i++;
     }
-    if (i > 0 && strcmp(args[i - 1], "&") == 0) {
+    if (i > 0 && strcmp(args[i - 1], "&") == 0)
+    {
         background = 1;
         args[i - 1] = NULL;
     }
-    
+
     __pid_t pid = fork();
     if (pid < 0)
     {
@@ -119,11 +122,13 @@ int execute_command(char **args)
     }
     else if (pid > 0)
     {
-        if (!background) {
+        if (!background)
+        {
             pid_t end = waitpid(pid, NULL, 0);
         }
     }
-    else {
+    else
+    {
         perror("fork failed");
     }
 }
@@ -143,7 +148,7 @@ int main(void)
     shell_loop();
 }
 
-char **parse_input(char *input)
+char **parse_input(char *input, struct hashmap *env)
 {
     char **tokens = malloc(MAX_ARGS * sizeof(char *));
     size_t position = 0, token_len = 0;
@@ -208,6 +213,45 @@ char **parse_input(char *input)
 
     tokens[position] = NULL;
     return tokens;
+}
+
+void expand_tokens(char ***args_ptr, struct hashmap *env)
+{
+    char **args = *args_ptr;
+    char **new_args = malloc(MAX_ARGS * sizeof(char *));
+    int new_pos = 0;
+
+    for (int i = 0; args[i]; i++)
+    {
+        if (args[i][0] == '$')
+        {
+            char *name = args[i] + 1;
+
+            const struct var *v =
+                hashmap_get(env, &(struct var){.name = name});
+
+            if (v)
+            {
+                char *copy = strdup(v->value);
+                char *token = strtok(copy, " ");
+
+                while (token && new_pos < MAX_ARGS - 1)
+                {
+                    new_args[new_pos++] = strdup(token);
+                    token = strtok(NULL, " ");
+                }
+
+                free(copy);
+            }
+        }
+        else
+        {
+            new_args[new_pos++] = strdup(args[i]);
+        }
+    }
+    new_args[new_pos] = NULL;
+    free_args(args);
+    *args_ptr = new_args;
 }
 
 // functions required by the hashmap
@@ -275,37 +319,10 @@ int echo(char **args, struct hashmap *env)
 {
     for (int i = 1; args[i]; i++)
     {
-        char *p = args[i];
-
-        while (*p)
-        {
-            if (*p == '$')
-            {
-                p++;
-                char name[256];
-                int j = 0;
-
-                while (*p && *p != ' ')
-                {
-                    name[j++] = *p;
-                    p++;
-                }
-                name[j] = '\0';
-
-                const struct var *v = hashmap_get(env, &(struct var){.name = name});
-                if (v)
-                {
-                    printf("%s", v->value);
-                }
-            }
-            else
-            {
-                putchar(*p);
-                p++;
-            }
-        }
-        if (args[i + 1])
+        printf("%s", args[i]);
+        if (args[i + 1]) {
             printf(" ");
+        }
     }
     printf("\n");
     return 0;
@@ -327,21 +344,24 @@ int shell_exit(char **args, struct hashmap *env)
     exit(0);
 }
 
-void sigchildhandler(int sig) {
+void sigchildhandler(int sig)
+{
     __pid_t pid;
 
-    while((pid = waitpid(-1, NULL, WNOHANG)) > 0) {
+    while ((pid = waitpid(-1, NULL, WNOHANG)) > 0)
+    {
         FILE *log = fopen("log.txt", "a");
 
-        if (log) {
+        if (log)
+        {
             fprintf(log, "Child process terminated: %d\n", pid);
             fclose(log);
         }
-
     }
 }
 
-void setupsighandler() {
+void setupsighandler()
+{
     struct sigaction sa;
     sa.sa_handler = sigchildhandler;
     sigemptyset(&sa.sa_mask);
