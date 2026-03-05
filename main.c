@@ -305,8 +305,11 @@ int cd(char **args, struct hashmap *env)
     {
         const char *home = getenv("HOME");
         snprintf(fullpath, sizeof(fullpath), "%s%s", home, path + 1);
-        printf("%s\n", fullpath);
-        printf("%s\n", path);
+        if (chdir(fullpath) != 0)
+        {
+            perror("Error:");
+            return 0;
+        }
     }
     if (chdir(path) != 0)
     {
@@ -320,7 +323,8 @@ int echo(char **args, struct hashmap *env)
     for (int i = 1; args[i]; i++)
     {
         printf("%s", args[i]);
-        if (args[i + 1]) {
+        if (args[i + 1])
+        {
             printf(" ");
         }
     }
